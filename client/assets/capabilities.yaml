@@ -1,0 +1,11 @@
+# Zobius Protocol — Example Partner Capabilities
+# Copy this file and update for each partner you connect with
+partner: example
+capabilities:
+  - architecture-coaching
+  - build-guidance
+  - automation-patterns
+  - technical-decisions
+rate_limit: 50/day
+pii_filter: conservative
+audit: hash-chain
