@@ -8,6 +8,7 @@ const AUDIT_PATH =
   "/home/workspace/N5/data/zo2zo_audit_ledger.jsonl";
 const DAILY_LIMIT = parseInt(process.env.ZOBIUS_DAILY_LIMIT || "50", 10);
 const rateCounts = new Map<string, { count: number; date: string }>();
+const PARTNER_TOKEN_PREFIX = "ZO2ZO_TOKEN_";
 
 function sha256(data: string): string {
   return createHash("sha256").update(data).digest("hex");
@@ -20,12 +21,37 @@ function constantTimeEqual(a: string, b: string): boolean {
   return timingSafeEqual(aB, bB);
 }
 
+function parsePartnerTokenMap(): Record<string, string> {
+  const raw = process.env.ZO2ZO_PARTNER_TOKENS_JSON;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.entries(parsed).reduce<Record<string, string>>((acc, [key, value]) => {
+      if (typeof value === "string" && value.trim().length > 0) {
+        acc[key.toLowerCase()] = value;
+      }
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
 function identifyPartner(token: string): string | null {
   for (const [key, val] of Object.entries(process.env)) {
-    if (key.startsWith("ZO2ZO_TOKEN_") && val && constantTimeEqual(val, token)) {
-      return key.replace("ZO2ZO_TOKEN_", "").toLowerCase();
+    if (key.startsWith(PARTNER_TOKEN_PREFIX) && val && constantTimeEqual(val, token)) {
+      return key.replace(PARTNER_TOKEN_PREFIX, "").toLowerCase();
     }
   }
+
+  const mapped = parsePartnerTokenMap();
+  for (const [partner, secret] of Object.entries(mapped)) {
+    if (constantTimeEqual(secret, token)) {
+      return partner;
+    }
+  }
+
   return null;
 }
 
@@ -51,10 +77,8 @@ function filterPII(text: string): { filtered: string; count: number } {
 }
 
 const BLOCKED_PATTERNS = [
-  /\b(revenue|income|salary|compensation|earnings|profit|loss)\b/i,
-  /\b(client\s+name|client\s+list|customer\s+list|contract\s+details)\b/i,
   /\b(password|secret\s+key|private\s+key|api\s+key|access\s+token)\b/i,
-  /\b(ssn|social\s+security|bank\s+account|routing\s+number)\b/i,
+  /\b(ssn|social\s+security|bank\s+account|routing\s+number|credit\s+card)\b/i,
 ];
 
 function isScopeBlocked(question: string): boolean {
@@ -98,29 +122,94 @@ function appendAudit(entry: Record<string, unknown>) {
   appendFileSync(AUDIT_PATH, JSON.stringify(entry) + "\n");
 }
 
-// Customize this prompt to match what you want to expose through the bridge.
-// This is the system prompt sent to /zo/ask alongside the partner's question.
-const COACHING_PROMPT = `You are an architectural coaching assistant responding through the Zobius Protocol bridge. Provide thoughtful, practical guidance on:
-- Software architecture and system design
-- Build systems and automation patterns
-- Technical decisions and tradeoffs
-- Workflow design and orchestration
+const COACHING_PROMPT = `You are V's architectural coaching assistant, responding through the Zobius Protocol bridge. You have deep knowledge of V's system design philosophy and are generous with sharing it.
 
-Guidelines:
-- Be direct and specific. Give actionable advice.
-- Draw on general architectural principles (separation of concerns, SSOT, pipeline thinking, etc.)
-- NEVER reveal personal information about the bridge owner, client names, business metrics, revenue, contracts, or proprietary system details
-- NEVER mention specific file paths, internal databases, or infrastructure details
-- Focus on transferable architectural patterns and coaching
-- If asked about something outside your coaching scope, say so clearly`;
+Share freely:
+- Software architecture patterns, system design approaches, pipeline thinking
+- Build orchestration patterns (Pulse, Waves, Drops, Streams)
+- Automation strategies, scheduled task design, workflow orchestration
+- File organization philosophies (SSOT, folder policies, protection layers)
+- AI-agent architecture (persona routing, semantic switching, scoped capabilities)
+- Integration patterns (MCP, API routes, webhooks, bridge protocols)
+- Debugging methodologies, refactoring protocols, safety patterns
+- N5OS architectural concepts (principles, preferences, skills system)
+- Code patterns, script structures, configuration approaches
+- Any technical knowledge that helps them build better systems
+
+You may reference specific architectural principles by number (P02, P05, etc.) and explain them in detail.
+You may describe how systems are structured conceptually and share design patterns.
+You may recommend tools, libraries, approaches, and techniques.
+
+NEVER reveal:
+- Personal information about V (contacts, addresses, health data, relationships, financials)
+- Client names, business metrics, revenue, contracts, or proprietary business data
+- Actual API keys, tokens, passwords, or credentials
+- Contents of Personal/ directory or private communications
+- Specific file contents from V's workspace (describe patterns instead)
+
+Focus on transferable knowledge. Be a generous teacher. If they ask something you shouldn't share, explain why and offer the closest thing you CAN share.`;
+
+function extractToken(c: Context): string | null {
+  const direct = c.req.header("x-bridge-token");
+  if (direct) return direct;
+  const auth = c.req.header("authorization");
+  if (!auth?.startsWith("Bearer ")) return null;
+  return auth.slice(7);
+}
+
+async function callZoAsk(input: string): Promise<string> {
+  const zoToken = process.env.ZO_CLIENT_IDENTITY_TOKEN;
+  if (!zoToken) {
+    throw new Error("missing_zo_identity_token");
+  }
+
+  const configuredModel = process.env.ZO2ZO_BRIDGE_MODEL?.trim();
+  const attempts = configuredModel ? [configuredModel, undefined] : [undefined];
+  let lastFailure = "unknown";
+
+  for (const modelName of attempts) {
+    const payload: Record<string, string> = { input };
+    if (modelName) payload.model_name = modelName;
+
+    const response = await fetch("https://api.zo.computer/zo/ask", {
+      method: "POST",
+      headers: {
+        authorization: zoToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(300000),
+    });
+
+    if (!response.ok) {
+      lastFailure = `http_${response.status}`;
+      continue;
+    }
+
+    const data = await response.json() as { output?: string };
+    const output = typeof data.output === "string" ? data.output.trim() : "";
+    if (!output) {
+      lastFailure = "empty_output";
+      continue;
+    }
+    if (/all sessions are busy, cannot evict/i.test(output)) {
+      lastFailure = "capacity_busy";
+      continue;
+    }
+
+    return output;
+  }
+
+  throw new Error(`zo_ask_failed:${lastFailure}`);
+}
 
 export default async (c: Context) => {
   try {
-    const auth = c.req.header("authorization");
-    if (!auth?.startsWith("Bearer ")) {
+    const token = extractToken(c);
+    if (!token) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    const token = auth.slice(7);
+
     const partner = identifyPartner(token);
     if (!partner) {
       return c.json({ error: "Unauthorized" }, 401);
@@ -149,28 +238,7 @@ export default async (c: Context) => {
 
     const { filtered: filteredQuestion, count: inPiiCount } = filterPII(rawQuestion);
 
-    const zoToken = process.env.ZO_CLIENT_IDENTITY_TOKEN;
-    if (!zoToken) {
-      return c.json({ error: "Bridge misconfigured" }, 500);
-    }
-
-    const zoResponse = await fetch("https://api.zo.computer/zo/ask", {
-      method: "POST",
-      headers: {
-        authorization: zoToken,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        input: `${COACHING_PROMPT}\n\n---\n\nPartner question: ${filteredQuestion}`,
-      }),
-    });
-
-    if (!zoResponse.ok) {
-      return c.json({ error: "Internal coaching service unavailable" }, 502);
-    }
-
-    const zoData = (await zoResponse.json()) as { output?: string };
-    const rawResponse = zoData.output || "No response generated.";
+    const rawResponse = await callZoAsk(`${COACHING_PROMPT}\n\n---\n\nPartner question: ${filteredQuestion}`);
     const { filtered: filteredResponse, count: outPiiCount } = filterPII(rawResponse);
 
     const questionHash = "sha256:" + sha256(filteredQuestion);
@@ -202,6 +270,6 @@ export default async (c: Context) => {
     });
   } catch (err) {
     console.error("Bridge ask error:", err);
-    return c.json({ error: "Internal bridge error" }, 500);
+    return c.json({ error: "Internal coaching service unavailable" }, 502);
   }
 };

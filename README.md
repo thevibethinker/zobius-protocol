@@ -22,15 +22,17 @@ Your Zo                              Partner's Zo
 3. **Both log**: Server appends to its audit ledger, client appends to its local ledger. Both include hash-chain links so tampering is detectable
 4. **You verify**: Run `audit` to compare your local ledger against the server's — mismatches surface immediately
 
+No GitHub login is required for clients. The repo is public and install can be done with `curl` + `tar`.
+
 ## Architecture
 
 ### Security Layers
 
 | Layer | What it does |
 |-------|-------------|
-| **Bearer auth** | Per-partner tokens. Server identifies caller via `ZO2ZO_TOKEN_<HANDLE>` env vars |
+| **Bridge token auth** | Per-partner tokens. Client sends `X-Bridge-Token` (or `Authorization` fallback). Server identifies callers via `ZO2ZO_TOKEN_<HANDLE>` and optional `ZO2ZO_PARTNER_TOKENS_JSON` |
 | **PII filter** | Regex-based scrubbing of emails, phones, SSNs, API keys, credit cards, IPs, and file paths — applied to both inbound questions and outbound responses |
-| **Scope guard** | Blocks queries about revenue, client lists, passwords, financial data |
+| **Scope guard** | Blocks direct credential/secret extraction attempts |
 | **Rate limiter** | Configurable daily cap per partner (default: 50/day) |
 | **Hash-chain audit** | Every exchange gets a `chain_hash = sha256(prev_hash + question_hash + response_hash)`. Tamper-evident, verifiable by both sides |
 
@@ -68,9 +70,7 @@ It explicitly does NOT expose:
 
 1. **Install the client skill**:
    ```bash
-   # From the Zo skills registry (when published):
-   # Or manually: copy client/ to Skills/zobius-client/
-   cp -r client/ /home/workspace/Skills/zobius-client/
+   curl -fsSL https://raw.githubusercontent.com/thevibethinker/zobius-protocol/main/scripts/install-client.sh | bash
    ```
 
 2. **Add partner credentials** in Settings > Advanced:
@@ -89,6 +89,14 @@ It explicitly does NOT expose:
    bun run Skills/zobius-client/scripts/query.ts audit va
    ```
 
+## David Fast Setup
+
+For V ↔ David specifically, use the full walkthrough in `docs/onboarding.md`. It includes:
+- host-side secret names (`ZO2ZO_TOKEN_DAVID`)
+- David-side secret names (`ZO2ZO_BRIDGE_URL_VA`, `ZO2ZO_BRIDGE_TOKEN_VA`)
+- a copy-paste install command that works anonymously
+- a smoke test command to validate auth and response path
+
 ## Commands
 
 | Command | Description |
@@ -105,8 +113,10 @@ It explicitly does NOT expose:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ZO2ZO_TOKEN_<HANDLE>` | Bearer token for partner `<HANDLE>` | Required |
+| `ZO2ZO_PARTNER_TOKENS_JSON` | Optional JSON token map (e.g., `{"david":"...","zoputer":"..."}`) | None |
 | `ZOBIUS_AUDIT_PATH` | Path to server audit ledger | `N5/data/zo2zo_audit_ledger.jsonl` |
 | `ZOBIUS_DAILY_LIMIT` | Max queries per partner per day | `50` |
+| `ZO2ZO_BRIDGE_MODEL` | Optional model override for `/zo/ask` calls | Default Zo model |
 
 ### Client-side (bridge consumer)
 
