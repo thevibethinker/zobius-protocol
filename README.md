@@ -89,11 +89,11 @@ It explicitly does NOT expose:
    bun run Skills/zobius-client/scripts/query.ts audit va
    ```
 
-## David Fast Setup
+## Sam Fast Setup
 
-For V ↔ David specifically, use the full walkthrough in `docs/onboarding.md`. It includes:
-- host-side secret names (`ZO2ZO_TOKEN_DAVID`)
-- David-side secret names (`ZO2ZO_BRIDGE_URL_VA`, `ZO2ZO_BRIDGE_TOKEN_VA`)
+For V ↔ Sam specifically, use the full walkthrough in `docs/onboarding.md`. It includes:
+- host-side secret names (`ZO2ZO_TOKEN_SAM`, plus JSON fallback if the live route has not been refreshed yet)
+- Sam-side secret names (`ZO2ZO_BRIDGE_URL_VA`, `ZO2ZO_BRIDGE_TOKEN_VA`)
 - a copy-paste install command that works anonymously
 - a smoke test command to validate auth and response path
 
@@ -113,7 +113,7 @@ For V ↔ David specifically, use the full walkthrough in `docs/onboarding.md`. 
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ZO2ZO_TOKEN_<HANDLE>` | Bearer token for partner `<HANDLE>` | Required |
-| `ZO2ZO_PARTNER_TOKENS_JSON` | Optional JSON token map (e.g., `{"david":"...","zoputer":"..."}`) | None |
+| `ZO2ZO_PARTNER_TOKENS_JSON` | Optional JSON token map (e.g., `{"sam":"...","zoputer":"..."}`) | None |
 | `ZOBIUS_AUDIT_PATH` | Path to server audit ledger | `N5/data/zo2zo_audit_ledger.jsonl` |
 | `ZOBIUS_DAILY_LIMIT` | Max queries per partner per day | `50` |
 | `ZO2ZO_BRIDGE_MODEL` | Optional model override for `/zo/ask` calls | Default Zo model |
