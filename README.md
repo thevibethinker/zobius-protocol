@@ -64,7 +64,7 @@ It explicitly does NOT expose:
 
 3. **Share with your partner**: Your bridge URL (`https://<handle>.zo.space/api/bridge`) and their token.
 
-4. **Optional**: Set `ZOBIUS_AUDIT_PATH` to customize where the server audit ledger is stored. Set `ZOBIUS_DAILY_LIMIT` to change the rate limit (default: 50).
+4. **Optional**: Set `ZOBIUS_AUDIT_PATH` to customize where the server audit ledger is stored, `ZOBIUS_TELEMETRY_PATH` to customize the telemetry log path, and `ZOBIUS_DAILY_LIMIT` to change the rate limit (default: 50).
 
 ### As a Bridge Client (querying a partner's Zo)
 
@@ -115,6 +115,7 @@ For V ↔ Sam specifically, use the full walkthrough in `docs/onboarding.md`. It
 | `ZO2ZO_TOKEN_<HANDLE>` | Bearer token for partner `<HANDLE>` | Required |
 | `ZO2ZO_PARTNER_TOKENS_JSON` | Optional JSON token map (e.g., `{"sam":"...","zoputer":"..."}`) | None |
 | `ZOBIUS_AUDIT_PATH` | Path to server audit ledger | `N5/data/zo2zo_audit_ledger.jsonl` |
+| `ZOBIUS_TELEMETRY_PATH` | Path to server telemetry log | `N5/data/zo2zo_telemetry.jsonl` |
 | `ZOBIUS_DAILY_LIMIT` | Max queries per partner per day | `50` |
 | `ZO2ZO_BRIDGE_MODEL` | Optional model override for `/zo/ask` calls | Default Zo model |
 

@@ -6,9 +6,25 @@ import { dirname } from "node:path";
 const AUDIT_PATH =
   process.env.ZOBIUS_AUDIT_PATH ||
   "/home/workspace/N5/data/zo2zo_audit_ledger.jsonl";
+const TELEMETRY_PATH =
+  process.env.ZOBIUS_TELEMETRY_PATH ||
+  "/home/workspace/N5/data/zo2zo_telemetry.jsonl";
 const DAILY_LIMIT = parseInt(process.env.ZOBIUS_DAILY_LIMIT || "50", 10);
 const rateCounts = new Map<string, { count: number; date: string }>();
 const PARTNER_TOKEN_PREFIX = "ZO2ZO_TOKEN_";
+// Force env reload on 2026-03-17 — secrets added after initial deploy
+const ENV_RELOAD_TS = "2026-03-17";
+
+// Response cache for deduplication (prevents retry storms)
+const responseCache = new Map<string, { response: string; ts: number; auditHash: string }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function cleanCache() {
+  const now = Date.now();
+  for (const [key, val] of responseCache) {
+    if (now - val.ts > CACHE_TTL_MS) responseCache.delete(key);
+  }
+}
 
 function sha256(data: string): string {
   return createHash("sha256").update(data).digest("hex");
@@ -122,6 +138,12 @@ function appendAudit(entry: Record<string, unknown>) {
   appendFileSync(AUDIT_PATH, JSON.stringify(entry) + "\n");
 }
 
+function appendTelemetry(entry: Record<string, unknown>) {
+  const dir = dirname(TELEMETRY_PATH);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  appendFileSync(TELEMETRY_PATH, JSON.stringify(entry) + "\n");
+}
+
 const COACHING_PROMPT = `You are V's architectural coaching assistant, responding through the Zobius Protocol bridge. You have deep knowledge of V's system design philosophy and are generous with sharing it.
 
 Share freely:
@@ -233,12 +255,40 @@ export default async (c: Context) => {
     }
 
     if (isScopeBlocked(rawQuestion)) {
+      appendTelemetry({
+        ts: new Date().toISOString(),
+        partner,
+        event: "scope_blocked",
+        question_preview: rawQuestion.slice(0, 200),
+      });
       return c.json({ error: "Query outside bridge scope" }, 403);
     }
 
     const { filtered: filteredQuestion, count: inPiiCount } = filterPII(rawQuestion);
 
+    // Check response cache for deduplication
+    cleanCache();
+    const cacheKey = `${partner}:${sha256(filteredQuestion)}`;
+    const cached = responseCache.get(cacheKey);
+    if (cached) {
+      appendTelemetry({
+        ts: new Date().toISOString(),
+        partner,
+        event: "cache_hit",
+        question_preview: filteredQuestion.slice(0, 200),
+        original_audit_hash: cached.auditHash,
+      });
+      return c.json({
+        response: cached.response,
+        audit_hash: cached.auditHash,
+        rate_remaining: rateCheck.remaining,
+        cached: true,
+      });
+    }
+
+    const startMs = Date.now();
     const rawResponse = await callZoAsk(`${COACHING_PROMPT}\n\n---\n\nPartner question: ${filteredQuestion}`);
+    const elapsedMs = Date.now() - startMs;
     const { filtered: filteredResponse, count: outPiiCount } = filterPII(rawResponse);
 
     const questionHash = "sha256:" + sha256(filteredQuestion);
@@ -262,6 +312,28 @@ export default async (c: Context) => {
       pii_flags: inPiiCount + outPiiCount,
     };
     appendAudit(auditEntry);
+
+    // Telemetry: log actual content for self-improvement loop
+    appendTelemetry({
+      ts: new Date().toISOString(),
+      seq: auditEntry.seq,
+      partner,
+      event: "query",
+      question_preview: filteredQuestion.slice(0, 500),
+      response_preview: filteredResponse.slice(0, 500),
+      response_length: filteredResponse.length,
+      elapsed_ms: elapsedMs,
+      pii_flags_in: inPiiCount,
+      pii_flags_out: outPiiCount,
+      audit_hash: chainHash,
+    });
+
+    // Cache response for deduplication
+    responseCache.set(cacheKey, {
+      response: filteredResponse,
+      ts: Date.now(),
+      auditHash: chainHash,
+    });
 
     return c.json({
       response: filteredResponse,

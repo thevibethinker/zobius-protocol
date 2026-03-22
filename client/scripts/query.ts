@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { readFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-const AUDIT_PATH = "/home/workspace/N5/data/zo2zo_client_audit.jsonl";
+const AUDIT_PATH =
+  process.env.ZOBIUS_CLIENT_AUDIT_PATH ||
+  "/home/workspace/N5/data/zo2zo_client_audit.jsonl";
 
 function sha256(data: string): string {
   return createHash("sha256").update(data).digest("hex");
